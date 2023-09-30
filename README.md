@@ -6,4 +6,4 @@
 
 - A queueing system with BullMQ and Redis
 - A dashboard built with `bull-board`
-- A Fastify server to trigger jobs via an `/add-job` API endpoint
+- A Fastify server to trigger jobs via a `/jobs` API endpoint
