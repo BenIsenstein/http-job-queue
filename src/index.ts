@@ -71,8 +71,8 @@ const run = async () => {
     }
 
     const body = req.body as { job: HttpJob, options: JobsOptions }
-    const job = body.job as HttpJob
-    const options = body.options as JobsOptions
+    const job = body.job
+    const options = body.options
     const jobId = uuidv4()
 
     await httpRequestQueue.add(`http-job-${jobId}`, job, { ...options, jobId })
@@ -80,7 +80,7 @@ const run = async () => {
     reply.send({ ok: true })
   })
 
-  await server.listen({ port: env.PORT, host: '0.0.0.0' })
+  await server.listen({ port: env.PORT || 8080, host: '::' })
 }
 
 run().catch((e) => {
