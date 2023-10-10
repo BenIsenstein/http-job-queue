@@ -1,89 +1,72 @@
-import { createBullBoard } from '@bull-board/api'
-import { BullMQAdapter } from '@bull-board/api/bullMQAdapter'
-import { env } from './env'
-import { ConnectionOptions, Job, JobsOptions, Queue, QueueScheduler, Worker } from 'bullmq'
-import { FastifyAdapter } from '@bull-board/fastify'
-import fastify, { FastifyInstance } from 'fastify'
-import { Server, IncomingMessage, ServerResponse } from 'http'
+import { HttpJob } from './types'
+import { getUnprocessedJobs, insertJob, updateProcessedJob } from './db'
 
-function uuidv4() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0,
-        v = c === 'x' ? r : (r & 0x3 | 0x8)
-    return v.toString(16)
-  })
-}
+const port = process.env.PORT ? Number(process.env.PORT) : 8080
+const hostname = process.env.USE_LOCAL_HOST ? 'localhost' : '[::]'
+const queuePollInterval = process.env.QUEUE_POLL_INTERVAL ? Number(process.env.QUEUE_POLL_INTERVAL) : 60000
+const httpJobQueue: HttpJob[] = []
+const jobsInProgress: Set<number> = new Set()
 
-const QUEUE_NAME = 'HttpRequests'
-
-const connection: ConnectionOptions = {
-  host: env.REDISHOST,
-  port: env.REDISPORT,
-  username: env.REDISUSER,
-  password: env.REDISPASSWORD,
-}
-
-interface HttpJob {
-  method: 'GET' |'POST' | 'PUT' | 'PATCH' | 'OPTIONS' | 'DELETE',
-  url: string,
-  headers?: Record<string, string>,
-  body?: Record<string, unknown>
-}
-
-const run = async () => {
-  const httpRequestQueue = new Queue<HttpJob, string>(QUEUE_NAME, { connection })
-  const queueScheduler = new QueueScheduler(QUEUE_NAME, { connection })
-  await queueScheduler.waitUntilReady()
-
-  new Worker(
-    QUEUE_NAME,
-    async (job: Job<HttpJob, any, string>) => {
-      const res = await fetch(job.data.url, {
-        method: job.data.method,
-        headers: job.data.headers,
-        body: job.data.body && JSON.stringify(job.data.body)
-      })
-
-      return res.status + ' ' + res.statusText
-    },
-    { connection }
-  )
-
-  const server: FastifyInstance<Server, IncomingMessage, ServerResponse> = fastify()
-  const serverAdapter = new FastifyAdapter()
-  
-  createBullBoard({
-    queues: [new BullMQAdapter(httpRequestQueue)],
-    serverAdapter
-  })
-
-  serverAdapter.setBasePath('/')
-
-  server.register(serverAdapter.registerPlugin(), {
-    prefix: '/',
-    basePath: '/'
-  })
-
-  server.post('/jobs', async (req, reply) => {
-    if (!req.body) {
-      reply.status(400).send({ error: 'Requests must contain a body.' })
-      return
+Bun.serve({
+  hostname,
+  port,
+  fetch: async (req): Promise<Response> => {
+    const bodyStr = (await req.body?.getReader()?.readMany())
+      ?.value
+      ?.reduce((result, current: Uint8Array) => result + String.fromCharCode(...current), '')
+    
+    if (!bodyStr) {
+      return new Response(null, { status: 400, statusText: 'No request body' })
     }
 
-    const body = req.body as { job: HttpJob, options: JobsOptions }
-    const job = body.job
-    const options = body.options
-    const jobId = uuidv4()
+    let reqBody: HttpJob
 
-    await httpRequestQueue.add(`http-job-${jobId}`, job, { ...options, jobId })
+    try {
+      reqBody = JSON.parse(bodyStr)
+    } catch {
+      return new Response(null, { status: 400, statusText: 'Invalid JSON' })
+    }
 
-    reply.send({ ok: true })
-  })
+    insertJob.run({
+      $method: reqBody.method || 'GET',
+      $url: reqBody.url || 'https://example.com',
+      $headers: reqBody.headers || null,
+      $body: reqBody.body || null,
+      $executionTime: reqBody.executionTime || 0,
+      $retry: reqBody.retry || null,
+      $processed: false
+    })
 
-  await server.listen({ port: env.PORT || 8080, host: '::' })
-}
-
-run().catch((e) => {
-  console.error(e)
-  process.exit(1)
+    return new Response(null, { status: 204 })
+  }
 })
+
+console.log(`Listening at ${hostname}:${port}`)
+
+setInterval(async () => {
+  httpJobQueue.push(...getUnprocessedJobs.all(Date.now()))
+
+  while (httpJobQueue.length) {
+    const job = httpJobQueue.shift()!
+    
+    if (jobsInProgress.has(job.id!)) continue
+    
+    jobsInProgress.add(job.id!)
+
+    try {
+      const res = await fetch(job.url, {
+        method: job.method,
+        headers: job.headers ? JSON.parse(job.headers) : undefined,
+        body: job.body || undefined
+      })
+
+      updateProcessedJob.run(`${res.status} ${res.statusText}`, job.id!)
+      console.log(`Job #${job.id!}`, job.method, job.url, `${res.status} ${res.statusText}`)
+    } catch (e) {
+      updateProcessedJob.run(`ERR "${(e as Error).message}"`, job.id!)
+      console.log(`Job #${job.id!}`, job.method, job.url, (e as Error).message)
+    }
+
+    jobsInProgress.delete(job.id!)
+  }
+}, queuePollInterval)

@@ -8,19 +8,13 @@
   ],
   "scripts": {
     "watch": "bun --watch run src/index.ts",
+    "prestart": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
     "start": "bun run src/index.ts"
   },
   "devDependencies": {
     "bun-types": "latest"
   },
-  "dependencies": {
-    "@bull-board/api": "^4.2.2",
-    "@bull-board/fastify": "^4.2.2",
-    "@bull-board/ui": "^4.2.2",
-    "bullmq": "^1.90.2",
-    "envsafe": "^2.0.3",
-    "fastify": "^4.5.3"
-  },
+  "dependencies": {},
   "peerDependencies": {
     "typescript": "^5.0.0"
   }
