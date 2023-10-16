@@ -63,7 +63,7 @@ export const runHttpJob = async (job: HttpJob) => {
   const start = performance.now()
   let message = ''
 
-  for (let i = 0; i <= job.retry; i++) {
+  for (let i = 0; i <= (job.retry || 0); i++) {
     try {
       if (i) await new Promise(resolve => setTimeout(resolve, 2 ** i * 1000))
 
