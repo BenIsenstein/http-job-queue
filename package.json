@@ -7,9 +7,10 @@
     "src"
   ],
   "scripts": {
-    "watch": "bun --watch run src/index.ts",
+    "watch": "bun run prestart && bun --watch run src/index.ts",
     "prestart": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
-    "start": "bun run src/index.ts"
+    "start": "bun run src/index.ts",
+    "loadtest": "rm -rf sqlite && bun run prestart && bun run src/loadtest.ts"
   },
   "devDependencies": {
     "bun-types": "latest"

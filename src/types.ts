@@ -7,4 +7,5 @@ export interface HttpJob {
     executionTime: number
     retry?: number
     processed?: boolean
+    directToQueue?: boolean
 }
