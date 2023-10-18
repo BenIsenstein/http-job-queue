@@ -191,7 +191,7 @@ const startHttpServer = () => {
     hostname,
     port,
     async fetch(req): Promise<Response> {
-        if (req.url === 'jobs') {
+        if (req.url.endsWith('/jobs')) {
           const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
           return new Response(JSON.stringify(jobs), { status: 200, statusText: 'OK' })
         }
