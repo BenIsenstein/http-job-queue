@@ -1,9 +1,5 @@
 import { Database } from 'bun:sqlite'
 
-import { readdirSync } from 'fs'
-
-console.log(readdirSync(import.meta.dir + '/../..'))
-
 const queuePollInterval = process.env.QUEUE_POLL_INTERVAL ? Number(process.env.QUEUE_POLL_INTERVAL) : 60000
 const jobsBatchInterval = process.env.JOBS_BATCH_INTERVAL ? Number(process.env.JOBS_BATCH_INTERVAL) : 1000
 const jobsBatchSize = process.env.JOBS_BATCH_SIZE ? Number(process.env.JOBS_BATCH_SIZE) : 6
@@ -197,7 +193,11 @@ const startHttpServer = () => {
     async fetch(req): Promise<Response> {
         if (req.url.endsWith('/jobs')) {
           const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
-          return new Response(JSON.stringify(jobs), { status: 200, statusText: 'OK' })
+          return new Response(JSON.stringify(jobs), {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'Content-Type': 'application/json' }
+          })
         }
 
         let job: HttpJob
