@@ -191,6 +191,11 @@ const startHttpServer = () => {
     hostname,
     port,
     async fetch(req): Promise<Response> {
+        if (req.url === 'jobs') {
+          const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
+          return new Response(JSON.stringify(jobs), { status: 200, statusText: 'OK' })
+        }
+
         let job: HttpJob
     
         try {
@@ -228,7 +233,7 @@ const enqueueJobs = () => {
   }, queuePollInterval)
 }
 
-export const batchAndRunJobs = (runHttpJob: (job: HttpJob) => Promise<void>) => {
+export const batchAndRunJobs = (runJob: typeof runHttpJob) => {
   setInterval(async () => {
     if (!queue.length || jobsInProgress.size > maxJobsInProgress) return
   
@@ -239,7 +244,7 @@ export const batchAndRunJobs = (runHttpJob: (job: HttpJob) => Promise<void>) => 
       if (!job) break
       if (job.id !== undefined && jobsInProgress.has(job.id)) continue
       if (job.id !== undefined) jobsInProgress.add(job.id)
-      batchOfRuns.push(runHttpJob(job))
+      batchOfRuns.push(runJob(job))
     }
   
     await Promise.all(batchOfRuns)
