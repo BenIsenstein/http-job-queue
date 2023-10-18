@@ -7,8 +7,8 @@
     "src"
   ],
   "scripts": {
-    "watch": "bun run prestart && bun --watch run src/index.ts",
-    "prestart": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
+    "watch": "bun run create-sql-dir && bun --watch run src/index.ts",
+    "create-sql-dir": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
     "start": "bun run src/index.ts",
     "loadtest": "rm -rf sqlite && bun run prestart && bun run src/loadtest.ts"
   },
