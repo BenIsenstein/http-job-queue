@@ -1,5 +1,9 @@
 import { Database } from 'bun:sqlite'
 
+import { readdirSync } from 'fs'
+
+console.log(readdirSync(import.meta.dir))
+
 const queuePollInterval = process.env.QUEUE_POLL_INTERVAL ? Number(process.env.QUEUE_POLL_INTERVAL) : 60000
 const jobsBatchInterval = process.env.JOBS_BATCH_INTERVAL ? Number(process.env.JOBS_BATCH_INTERVAL) : 1000
 const jobsBatchSize = process.env.JOBS_BATCH_SIZE ? Number(process.env.JOBS_BATCH_SIZE) : 6
