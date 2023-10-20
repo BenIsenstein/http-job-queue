@@ -9,7 +9,8 @@
   "scripts": {
     "watch": "bun run create-sql-dir && bun --watch run src/index.ts",
     "create-sql-dir": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
-    "start": "bun run src/index.ts",
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun --minify",
+    "start": "bun run dist/index.js",
     "loadtest": "rm -rf sqlite && bun run prestart && bun run src/loadtest.ts"
   },
   "devDependencies": {

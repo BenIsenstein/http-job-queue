@@ -4,3 +4,4 @@ node_modules
 sqlite
 .env
 src/loadTest.ts
+dist

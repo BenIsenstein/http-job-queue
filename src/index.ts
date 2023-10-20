@@ -19,7 +19,7 @@ interface HttpJob {
     directToQueue?: boolean
 }
 
-const db = new Database(import.meta.dir + '/../sqlite/db.sqlite')
+const db = new Database(process.cwd() + '/sqlite/db.sqlite')
 
 db.run('PRAGMA journal_mode = WAL;')
 db.run(`CREATE TABLE IF NOT EXISTS jobs (
