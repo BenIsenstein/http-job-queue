@@ -1,11 +1,12 @@
 import { Database } from 'bun:sqlite'
+import { ClientRequest, request } from 'node:http'
 
 const queuePollInterval = process.env.QUEUE_POLL_INTERVAL ? Number(process.env.QUEUE_POLL_INTERVAL) : 60000
 const jobsBatchInterval = process.env.JOBS_BATCH_INTERVAL ? Number(process.env.JOBS_BATCH_INTERVAL) : 1000
 const jobsBatchSize = process.env.JOBS_BATCH_SIZE ? Number(process.env.JOBS_BATCH_SIZE) : 6
 const maxJobsInProgress = process.env.MAX_JOBS_IN_PROGRESS ? Number(process.env.MAX_JOBS_IN_PROGRESS) : 20
 const hostname = process.env.USE_LOCAL_HOST ? 'localhost' : '[::]'
-export const port = process.env.PORT ? Number(process.env.PORT) : 8080
+const port = process.env.PORT ? Number(process.env.PORT) : 8080
 
 interface HttpJob {
     id?: number
@@ -59,37 +60,61 @@ const getUnprocessedJobs = (...idsToExclude: number[]) => {
 
 const jobsInProgress: Set<number> = new Set()
 
-export const runHttpJob = async (job: HttpJob) => {
-  const start = performance.now()
-  let message = ''
+const runHttpJob = (job: HttpJob, currentTry = 1, message = '', start = 0) => {
+  if (!start) start = performance.now()
 
-  for (let i = 0; i <= (job.retry || 0); i++) {
-    try {
-      if (i) await new Promise(resolve => setTimeout(resolve, 2 ** i * 1000))
+  const req: ClientRequest = request(job.url, { 
+    method: job.method,
+    headers: job.headers ? JSON.parse(job.headers) : undefined,
+  })
 
-      const res = await fetch(job.url, {
-        method: job.method,
-        headers: job.headers ? JSON.parse(job.headers) : undefined,
-        body: job.body
-      })
+  if (job.body) req.write(job.body) // handle large body / drain ?
+  req.end()
 
-      message = `${res.status} ${res.statusText}`
-      break
-    } catch (e) {
-      message = `ERR "${(e as Error).message}"`
+  req.on('response', (res) => {
+    message = `${res.statusCode} ${res.statusMessage}`
+
+    if (job.directToQueue) {
+      job.processed = true
+      insertJob(job)
+    } else {
+      updateProcessedJob(message, job.id!)
     }
-  }
-
-  if (job.directToQueue) {
-    job.processed = true
-    insertJob(job)
-  } else {
-    updateProcessedJob(message, job.id!)
-  }
-
-  if (job.id !== undefined) jobsInProgress.delete(job.id)
   
-  console.log(job.method, job.url, message, `${Math.round(performance.now() - start)}ms`)
+    if (job.id !== undefined) jobsInProgress.delete(job.id)
+
+    if (res.headers['x-next-execution-ms']) {
+      insertJob({
+        ...job,
+        processed: false,
+        executionTime: Number(res.headers['x-next-execution-ms'])
+      })
+    }
+    
+    console.log(job.method, job.url, message, `${Math.round(performance.now() - start)}ms`)
+  })
+
+  req.on('error', (e) => {
+    message = `ERR "${e.message}"`
+
+    if (currentTry > job.retry) {
+      if (job.directToQueue) {
+        job.processed = true
+        insertJob(job)
+      } else {
+        updateProcessedJob(message, job.id!)
+      }
+    
+      if (job.id !== undefined) jobsInProgress.delete(job.id)
+      
+      console.log(job.method, job.url, message, `${Math.round(performance.now() - start)}ms`)
+      return
+    }
+
+    setTimeout(() => {
+      runHttpJob(job, currentTry + 1, message, start)
+    }, 2 ** currentTry * 1000)
+  })
 }
 
 interface JobNode {
@@ -186,75 +211,62 @@ const parseRequestBody = async (req: Request): Promise<HttpJob> => {
     return JSON.parse(bodyStr)
 }
 
-const startHttpServer = () => {
-  Bun.serve({
-    hostname,
-    port,
-    async fetch(req): Promise<Response> {
-        if (req.url.endsWith('/jobs')) {
-          const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
-          return new Response(JSON.stringify(jobs), {
-            status: 200,
-            statusText: 'OK',
-            headers: { 'Content-Type': 'application/json' }
-          })
-        }
+Bun.serve({
+  hostname,
+  port,
+  async fetch(req): Promise<Response> {
+      if (req.url.endsWith('/jobs')) {
+        const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
+        return new Response(JSON.stringify(jobs), {
+          status: 200,
+          statusText: 'OK',
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
 
-        let job: HttpJob
-    
-        try {
-            job = await parseRequestBody(req)
-        } catch(e) {
-            return new Response(null, { status: 400, statusText: (e as Error).message })
-        }
-    
-        if (!job.method || !job.url) {
-            return new Response(null, { status: 400, statusText: 'No method and/or url provided' })
-        }
-    
-        job.executionTime = job.executionTime || 0
-        job.retry = job.retry || 0
-        job.processed = false
-    
-        if (!job.executionTime || job.executionTime <= Date.now()) {
-            job.directToQueue = true
-            queue.enqueue(job)
-        } else {
-            insertJob(job)
-            console.log('CREATED JOB:', job.method, job.url)
-        }
-    
-        return new Response(null, { status: 204 })
-    }
-  })
-
-  console.log(`Listening at ${hostname}:${port}`)
-}
-
-const enqueueJobs = () => {
-  setInterval(() => {
-    queue.enqueue(...getUnprocessedJobs(...queue.ids(), ...jobsInProgress.keys()))
-  }, queuePollInterval)
-}
-
-export const batchAndRunJobs = (runJob: typeof runHttpJob) => {
-  setInterval(async () => {
-    if (!queue.length || jobsInProgress.size > maxJobsInProgress) return
+      let job: HttpJob
   
-    const batchOfRuns: Promise<void>[] = []
+      try {
+          job = await parseRequestBody(req)
+      } catch(e) {
+          return new Response(null, { status: 400, statusText: (e as Error).message })
+      }
+  
+      if (!job.method || !job.url) {
+          return new Response(null, { status: 400, statusText: 'No method and/or url provided' })
+      }
+  
+      job.executionTime = job.executionTime || 0
+      job.retry = job.retry || 0
+      job.processed = false
+  
+      if (!job.executionTime || job.executionTime <= Date.now()) {
+          job.directToQueue = true
+          queue.enqueue(job)
+      } else {
+          insertJob(job)
+          console.log('CREATED JOB:', job.method, job.url)
+      }
+  
+      return new Response(null, { status: 204 })
+  }
+})
+
+console.log(`Listening at ${hostname}:${port}`)
+
+setInterval(() => {
+  queue.enqueue(...getUnprocessedJobs(...queue.ids(), ...jobsInProgress.keys()))
+}, queuePollInterval)
+
+setInterval(() => {
+    if (!queue.length || jobsInProgress.size > maxJobsInProgress) return
   
     for (let i = 0; i < jobsBatchSize; i++) {
       const job = queue.dequeue()
       if (!job) break
       if (job.id !== undefined && jobsInProgress.has(job.id)) continue
       if (job.id !== undefined) jobsInProgress.add(job.id)
-      batchOfRuns.push(runJob(job))
+      runHttpJob(job)
     }
   
-    await Promise.all(batchOfRuns)
   }, jobsBatchInterval)
-}
-
-startHttpServer()
-enqueueJobs()
-batchAndRunJobs(runHttpJob)

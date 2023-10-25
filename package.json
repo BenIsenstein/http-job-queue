@@ -11,7 +11,7 @@
     "create-sql-dir": "if [ ! -d \"./sqlite\" ]; then mkdir \"./sqlite\"; fi",
     "build": "bun build ./src/index.ts --outdir ./dist --target bun --minify",
     "start": "bun run dist/index.js",
-    "loadtest": "rm -rf sqlite && bun run prestart && bun run src/loadtest.ts"
+    "loadtest": "rm -rf sqlite && bun run create-sql-dir && bun run src/loadtest.ts"
   },
   "devDependencies": {
     "bun-types": "latest"
