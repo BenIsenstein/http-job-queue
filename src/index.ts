@@ -215,13 +215,30 @@ Bun.serve({
   hostname,
   port,
   async fetch(req): Promise<Response> {
-      if (req.url.endsWith('/jobs')) {
-        const jobs = db.query<HttpJob, []>('SELECT * FROM jobs').all()
-        return new Response(JSON.stringify(jobs), {
-          status: 200,
-          statusText: 'OK',
-          headers: { 'Content-Type': 'application/json' }
-        })
+      if (req.url.endsWith('/db')) {
+        const body = parseRequestBody(req) as unknown as { query: string }
+        const { query } = body
+
+        if (!query) {
+          return new Response(null, { status: 400, statusText: 'SQL Query Required' })
+        }
+        
+        if (
+          (req.headers.get('Authorization') || req.headers.get('authorization')) !==
+          `Bearer ${process.env.SQLITE_TOKEN}`
+        ) {
+          return new Response(null, { status: 401 })
+        }
+
+        try {
+          return new Response(JSON.stringify(db.prepare(query).all()), {
+            status: 200,
+            statusText: 'OK',
+            headers: { 'Content-Type': 'application/json' }
+          })
+        } catch(e) {
+          return new Response(null, { status: 400, statusText: (e as Error).message })
+        }
       }
 
       let job: HttpJob
