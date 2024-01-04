@@ -216,17 +216,15 @@ Bun.serve({
   port,
   async fetch(req): Promise<Response> {
       if (req.url.endsWith('/db')) {
-        const body = parseRequestBody(req) as unknown as { query: string }
+        const body = await parseRequestBody(req) as unknown as { query: string }
+        const auth = req.headers.get('Authorization') || req.headers.get('authorization')
         const { query } = body
 
         if (!query) {
           return new Response(null, { status: 400, statusText: 'SQL Query Required' })
         }
         
-        if (
-          (req.headers.get('Authorization') || req.headers.get('authorization')) !==
-          `Bearer ${process.env.SQLITE_TOKEN}`
-        ) {
+        if (auth !== `Bearer ${process.env.SQLITE_TOKEN}`) {
           return new Response(null, { status: 401 })
         }
 
